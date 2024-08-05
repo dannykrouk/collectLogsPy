@@ -20,9 +20,11 @@ def main(argv=None):
 	# globals
 	global bOsLogsCollected
 	global bWebServerLogsCollected
+	global bWebAdaptorLogsCollected
 	global outputDir
 	bOsLogsCollected = False
 	bWebServerLogsCollected = False
+	bWebAdaptorLogsCollected = False 
 	outputDir = setupOutputDir()
 
 	# The user can specify their own config file.
@@ -83,20 +85,22 @@ def main(argv=None):
 		# Data Store (and whatever else we're configured to get ...)
 		gatherDataStore(dsPath, days, config_values)
 	
-	# Not getting Esri logs, are we getting web server access logs?			
-	elif config_values['getWebServerAccessLogs'] == True:
-		print('Collecting web server access logs ...')
+	# Not getting Esri logs, are we getting web server access logs?	
+	# We can re-use this function (in spite of the name)
+	gatherNonEsriAfterEsri(config_values, days)	
+	# elif config_values['getWebServerAccessLogs'] == True:
+		# print('Collecting web server access logs ...')
 		
-		if os.path.exists(config_values['pathWebServerAccessLogs']) == True:
-			collectWebAccessLogs(config_values['pathWebServerAccessLogs'], days)
-		else:
-			print('Web server log path does not exist or is not accessible: ' + config_values['pathWebServerAccessLogs'])
-		# Not getting Esri logs, are we getting OS logs?
-	elif config_values['getOsLogs'] == True:
-		print('Collecting OS logs ...')
+		# if os.path.exists(config_values['pathWebServerAccessLogs']) == True:
+			# collectWebAccessLogs(config_values['pathWebServerAccessLogs'], days)
+		# else:
+			# print('Web server log path does not exist or is not accessible: ' + config_values['pathWebServerAccessLogs'])
+		# # Not getting Esri logs, are we getting OS logs?
+	# elif config_values['getOsLogs'] == True:
+		# print('Collecting OS logs ...')
 		
-		if os.path.exists(config_values['pathOsLogs'] ) == True:
-			collectOsLogs(config_values['pathOsLogs'])
+		# if os.path.exists(config_values['pathOsLogs'] ) == True:
+			# collectOsLogs(config_values['pathOsLogs'])
 	
 	print('### COLLECTION PROCESS COMPLETE! ###')
 	
@@ -174,6 +178,9 @@ def gatherNonEsriAfterEsri(config_values, days):
 				collectWebAccessLogs(config_values['pathWebServerAccessLogs'], days)
 			else:
 				print('Web server log path does not exist or is not accessible: ' + config_values['pathWebServerAccessLogs'])
+	if config_values['getWebAdaptorLogs'] == True:
+		if bWebAdaptorLogsCollected == False:
+			collectWebAdaptorsLogs(config_values['pathWebAdaptors'], days)
 	
 
 # read the config file and return a dictionary of settings
@@ -188,11 +195,13 @@ def read_config(configFile):
 	getEsriTomcatLogs = config.getboolean('WhatToCollect','esritomcatlogs')
 	getAgsConfigStore = config.getboolean('WhatToCollect','agsconfigstore')
 	getAgsArcGisInputDirectory = config.getboolean('WhatToCollect','agsarcgisinputdirectory')
+	getWebAdaptorLogs = config.getboolean('WhatToCollect','webAdaptorLogs')
 	getPrtlWebgisdrLogs = config.getboolean('WhatToCollect','prtlwebgisdrlogs')
 	
 	filterNumberOfDays = config.get('Filters','days')
 	
 	pathWebServerAccessLogs = config.get('OsPaths','webserveraccesslogs')
+	pathWebAdaptors = config.get('OsPaths', 'webAdaptors') # Comma delimited list of paths to the Web Adaptor(s) (not the path to the Logs subdirectory)
 	pathOsLogs = config.get('OsPaths','oslogs')
 	
 	esriAgsPath = config.get('EsriPathsInEnvironmentVariablesDoNotExist','agsserver')
@@ -208,9 +217,11 @@ def read_config(configFile):
 		'getAgsConfigStore' : getAgsConfigStore,
 		'getAgsArcGisInputDirectory' : getAgsArcGisInputDirectory,
 		'getPrtlWebgisdrLogs' : getPrtlWebgisdrLogs,
+		'getWebAdaptorLogs' : getWebAdaptorLogs,
 		'filterNumberOfDays' : filterNumberOfDays,
 		'pathWebServerAccessLogs' : pathWebServerAccessLogs,
 		'pathOsLogs' : pathOsLogs,
+		'pathWebAdaptors' : pathWebAdaptors,
 		'esriAgsPath' : esriAgsPath,
 		'esriPrtlPath' : esriPrtlPath, 
 		'esriDsPath' : esriDsPath
@@ -221,9 +232,9 @@ def read_config(configFile):
 # create the config file if it doesn't exist
 def create_config():
 	config = configparser.ConfigParser()
-	config['WhatToCollect'] = {'esriMainLogs': True, 'webServerAccessLogs': True, 'osLogs': True, 'esriServiceLogs': True, 'esriTomcatLogs': True,'agsConfigStore': True, 'agsArcgisInputDirectory':True, 'prtlWebgisdrLogs': True}
+	config['WhatToCollect'] = {'esriMainLogs': True, 'webServerAccessLogs': True, 'osLogs': True, 'esriServiceLogs': True, 'esriTomcatLogs': True,'agsConfigStore': True, 'agsArcgisInputDirectory':True, 'prtlWebgisdrLogs': True, 'webAdaptorLogs' : False}
 	config['Filters'] = {'days': 10}
-	config['OsPaths'] = {'webServerAccessLogs': r'C:\inetpub\logs\LogFiles\W3SVC1','osLogs': r'C:\Windows\System32\winevt\Logs'}
+	config['OsPaths'] = {'webServerAccessLogs': r'C:\inetpub\logs\LogFiles\W3SVC1','osLogs': r'C:\Windows\System32\winevt\Logs', 'webAdaptors': r'C:\inetpub\wwwroot\arcgis,C:\inetpub\wwwroot\server'}
 	config['EsriPathsInEnvironmentVariablesDoNotExist'] =  {'AGSSERVER': r'C:\Program Files\ArcGIS\Server','AGSPORTAL': r'C:\Program Files\ArcGIS\Portal','AGSDATASTORE': r'C:\Program Files\ArcGIS\DataStore'} 
 	
 	configFilePath = Path('config.ini')
@@ -235,6 +246,25 @@ def create_config():
 def is_file_younger_than_x_days(file, days=7): 
 	file_time = os.path.getmtime(file) 
 	return ((time.time() - file_time) / 3600 < 24*days)
+
+def collectWebAdaptorsLogs(pathWebAdaptors, days):
+	webAdaptorList = pathWebAdaptors.split(',')
+	for webAdaptor in webAdaptorList:
+		if os.path.exists(webAdaptor):
+			webAdaptorName = os.path.basename(os.path.normpath(webAdaptor))
+			print ('Collecting Web Adaptor logs for ' + webAdaptorName + ' ...')
+			zipFileName = r'webAdaptorLogsFor' + webAdaptorName + r'.zip'
+			webAdaptorLogPath = webAdaptor + r'\Logs'
+			alwaysIncludeFileList = ['']
+			excludeFileExtensionsList = ['.rlock','.wlock','.lck']
+			try:
+				makeZip(zipFileName, webAdaptorLogPath, alwaysIncludeFileList, excludeFileExtensionsList, days)
+			except Exception as error:
+				print ('Unable to collect web access logs due to error', error)
+		else:
+			print ('Web Adaptor path does not exist or is not accessible: ' + webAdaptor)
+	global bWebAdaptorLogsCollected
+	bWebAdaptorLogsCollected = True
 
 def collectWebAccessLogs(pathWebServerAccessLogs, days):
 	if (os.name == 'nt'):
